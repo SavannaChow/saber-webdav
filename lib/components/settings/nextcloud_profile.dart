@@ -1,3 +1,4 @@
+// 🤖 Generated wholely or partially with GPT-5 Codex; OpenAI
 import 'dart:typed_data';
 
 import 'package:flutter/cupertino.dart';
@@ -8,10 +9,10 @@ import 'package:saber/components/theming/adaptive_icon.dart';
 import 'package:saber/components/theming/adaptive_linear_progress_indicator.dart';
 import 'package:saber/data/extensions/quota_extension.dart';
 import 'package:saber/data/file_manager/file_manager.dart';
-import 'package:saber/data/nextcloud/nextcloud_client_extension.dart';
 import 'package:saber/data/nextcloud/saber_syncer.dart';
 import 'package:saber/data/prefs.dart';
 import 'package:saber/data/routes.dart';
+import 'package:saber/data/sync/saber_sync_client.dart';
 import 'package:saber/i18n/strings.g.dart';
 import 'package:saber/pages/user/login.dart';
 
@@ -57,6 +58,7 @@ class _NextcloudProfileState extends State<NextcloudProfile> {
   Widget build(BuildContext context) {
     final loginStep =
         NextcloudProfile.forceLoginStep ?? NcLoginPage.getCurrentStep();
+    final isNextcloud = stows.syncBackend.value == SyncBackend.nextcloud;
     final heading = switch (loginStep) {
       .waitingForPrefs => '',
       .nc => t.login.status.loggedOut,
@@ -66,7 +68,7 @@ class _NextcloudProfileState extends State<NextcloudProfile> {
       .waitingForPrefs => '',
       .nc => t.login.status.tapToLogin,
       .enc => t.login.status.almostDone,
-      .done => t.login.status.loggedIn,
+      .done => isNextcloud ? t.login.status.loggedIn : 'WebDAV connected',
     };
     const pfpSize = 48.0;
 
@@ -91,13 +93,14 @@ class _NextcloudProfileState extends State<NextcloudProfile> {
               mainAxisSize: .min,
               spacing: 8,
               children: [
-                FutureBuilder(
-                  future: getStorageQuotaFuture,
-                  initialData: stows.lastStorageQuota.value,
-                  builder: (context, snapshot) {
-                    return _QuotaSummary(quota: snapshot.data);
-                  },
-                ),
+                if (isNextcloud)
+                  FutureBuilder(
+                    future: getStorageQuotaFuture,
+                    initialData: stows.lastStorageQuota.value,
+                    builder: (context, snapshot) {
+                      return _QuotaSummary(quota: snapshot.data);
+                    },
+                  ),
                 IconButton(
                   icon: const AdaptiveIcon(
                     icon: Icons.cloud_upload,
@@ -125,11 +128,12 @@ class _NextcloudProfileState extends State<NextcloudProfile> {
     if (NextcloudProfile.forceLoginStep != null)
       return stows.lastStorageQuota.value;
 
-    final client = NextcloudClientExtension.withSavedDetails();
+    if (stows.syncBackend.value != SyncBackend.nextcloud) return null;
+
+    final client = SaberSyncClient.withSavedDetails();
     if (client == null) return null;
 
-    final user = await client.provisioningApi.users.getCurrentUser();
-    stows.lastStorageQuota.value = user.body.ocs.data.quota;
+    stows.lastStorageQuota.value = await client.getStorageQuota();
     return stows.lastStorageQuota.value;
   }
 }

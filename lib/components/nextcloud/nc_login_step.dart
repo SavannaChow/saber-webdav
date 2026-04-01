@@ -1,3 +1,4 @@
+// 🤖 Generated wholely or partially with GPT-5 Codex; OpenAI
 import 'dart:async';
 import 'dart:math';
 
@@ -12,6 +13,7 @@ import 'package:saber/components/theming/adaptive_circular_progress_indicator.da
 import 'package:saber/data/nextcloud/login_flow.dart';
 import 'package:saber/data/nextcloud/nextcloud_client_extension.dart';
 import 'package:saber/data/prefs.dart';
+import 'package:saber/data/sync/saber_sync_client.dart';
 import 'package:saber/i18n/strings.g.dart';
 import 'package:saber/pages/user/login.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -33,8 +35,58 @@ class _NcLoginStepState extends State<NcLoginStep> {
   static const onSaberColor = Colors.black;
   static const saberColorDarkened = Color(0xFFc29800);
   static const ncColor = Color(0xFF0082c9);
+  static const webDavColor = Color(0xFF33691E);
 
   SaberLoginFlow? loginFlow;
+
+  final _serverUrlValid = ValueNotifier(false);
+  late final _serverUrlController = TextEditingController();
+
+  final _webDavValid = ValueNotifier(false);
+  final _webDavBusy = ValueNotifier(false);
+  final _webDavError = ValueNotifier('');
+  late final _webDavUrlController = TextEditingController();
+  late final _webDavUsernameController = TextEditingController();
+  late final _webDavPasswordController = TextEditingController();
+
+  late SyncBackend _selectedBackend = stows.syncBackend.value;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _serverUrlController.addListener(() {
+      final url = _prependHttpsIfMissing(_serverUrlController.text);
+      _serverUrlValid.value = validator.url(url);
+    });
+
+    void updateWebDavValid() {
+      final url = _prependHttpsIfMissing(_webDavUrlController.text);
+      _webDavValid.value =
+          validator.url(url) &&
+          _webDavUsernameController.text.isNotEmpty &&
+          _webDavPasswordController.text.isNotEmpty;
+    }
+
+    _webDavUrlController.addListener(updateWebDavValid);
+    _webDavUsernameController.addListener(updateWebDavValid);
+    _webDavPasswordController.addListener(updateWebDavValid);
+  }
+
+  @override
+  void dispose() {
+    loginFlow?.dispose();
+    _serverUrlController.dispose();
+    _webDavUrlController.dispose();
+    _webDavUsernameController.dispose();
+    _webDavPasswordController.dispose();
+    _serverUrlValid.dispose();
+    _webDavValid.dispose();
+    _webDavBusy.dispose();
+    _webDavError.dispose();
+    super.dispose();
+  }
+
   void startLoginFlow(Uri serverUrl) {
     loginFlow?.dispose();
     loginFlow = SaberLoginFlow.start(serverUrl: serverUrl);
@@ -53,6 +105,7 @@ class _NcLoginStepState extends State<NcLoginStep> {
       );
       final username = await client.getUsername();
 
+      stows.syncBackend.value = SyncBackend.nextcloud;
       stows.url.value =
           credentials.server ==
               NextcloudClientExtension.defaultNextcloudUri.toString()
@@ -72,25 +125,6 @@ class _NcLoginStepState extends State<NcLoginStep> {
     });
   }
 
-  final _serverUrlValid = ValueNotifier(false);
-  late final _serverUrlController = TextEditingController();
-
-  @override
-  void initState() {
-    super.initState();
-    _serverUrlController.addListener(() {
-      final url = _prependHttpsIfMissing(_serverUrlController.text);
-      _serverUrlValid.value = validator.url(url);
-    });
-  }
-
-  @override
-  void dispose() {
-    loginFlow?.dispose();
-    _serverUrlController.dispose();
-    super.dispose();
-  }
-
   static String _prependHttpsIfMissing(String url) {
     if (!url.startsWith(RegExp(r'https?://'))) {
       return 'https://$url';
@@ -105,7 +139,7 @@ class _NcLoginStepState extends State<NcLoginStep> {
     final screenWidth = MediaQuery.sizeOf(context).width;
     final screenHeight = MediaQuery.sizeOf(context).height;
     return ListView(
-      padding: .symmetric(
+      padding: EdgeInsets.symmetric(
         horizontal: screenWidth > width ? (screenWidth - width) / 2 : 16,
         vertical: 16,
       ),
@@ -137,92 +171,237 @@ class _NcLoginStepState extends State<NcLoginStep> {
           ),
         ),
         const SizedBox(height: 32),
-        Row(
-          mainAxisAlignment: .end,
-          children: [
-            SvgPicture.asset('assets/icon/icon.svg', width: 32, height: 32),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Text(
-                t.login.ncLoginStep.saberNcServer,
-                style: textTheme.headlineSmall,
-              ),
+        SegmentedButton<SyncBackend>(
+          segments: const [
+            ButtonSegment(
+              value: SyncBackend.nextcloud,
+              label: Text('Nextcloud'),
             ),
+            ButtonSegment(value: SyncBackend.webdav, label: Text('WebDAV')),
           ],
-        ),
-        const SizedBox(height: 16),
-        ElevatedButton(
-          onPressed: () =>
-              startLoginFlow(NextcloudClientExtension.defaultNextcloudUri),
-          style: buttonColorStyle(saberColor, onSaberColor),
-          child: Text(t.login.ncLoginStep.loginWithSaber),
-        ),
-        const SizedBox(height: 4),
-        Text.rich(
-          t.login.signup(
-            linkToSignup: (text) => TextSpan(
-              text: text,
-              style: TextStyle(
-                color: colorScheme.brightness == .dark
-                    ? saberColor
-                    : saberColorDarkened,
-              ),
-              recognizer: TapGestureRecognizer()
-                ..onTap = () {
-                  launchUrl(NcLoginPage.signupUrl);
-                },
-            ),
-          ),
-        ),
-        const SizedBox(height: 32),
-        Row(
-          mainAxisAlignment: .end,
-          children: [
-            SvgPicture.asset(
-              'assets/images/nextcloud-logo.svg',
-              width: 32,
-              height: 32,
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Text(
-                t.login.ncLoginStep.otherNcServer,
-                style: textTheme.headlineSmall,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        TextField(
-          autocorrect: false,
-          autofillHints: const [AutofillHints.url],
-          controller: _serverUrlController,
-          decoration: InputDecoration(
-            labelText: t.login.ncLoginStep.serverUrl,
-            hintText: 'https://nc.example.com',
-          ),
-        ),
-        const SizedBox(height: 4),
-        ValueListenableBuilder(
-          valueListenable: _serverUrlValid,
-          builder: (context, valid, child) {
-            return ElevatedButton(
-              onPressed: valid
-                  ? () {
-                      _serverUrlController.text = _prependHttpsIfMissing(
-                        _serverUrlController.text,
-                      );
-                      startLoginFlow(Uri.parse(_serverUrlController.text));
-                    }
-                  : null,
-              style: buttonColorStyle(ncColor),
-              child: child,
-            );
+          selected: {_selectedBackend},
+          onSelectionChanged: (selection) {
+            setState(() {
+              _selectedBackend = selection.first;
+              _webDavError.value = '';
+            });
           },
-          child: Text(t.login.ncLoginStep.loginWithNextcloud),
         ),
+        const SizedBox(height: 24),
+        if (_selectedBackend == SyncBackend.nextcloud)
+          ..._buildNextcloudLogin(context, textTheme, colorScheme)
+        else
+          ..._buildWebDavLogin(context, textTheme, colorScheme),
       ],
     );
+  }
+
+  List<Widget> _buildNextcloudLogin(
+    BuildContext context,
+    TextTheme textTheme,
+    ColorScheme colorScheme,
+  ) {
+    return [
+      Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          SvgPicture.asset('assets/icon/icon.svg', width: 32, height: 32),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Text(
+              t.login.ncLoginStep.saberNcServer,
+              style: textTheme.headlineSmall,
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 16),
+      ElevatedButton(
+        onPressed: () =>
+            startLoginFlow(NextcloudClientExtension.defaultNextcloudUri),
+        style: buttonColorStyle(saberColor, onSaberColor),
+        child: Text(t.login.ncLoginStep.loginWithSaber),
+      ),
+      const SizedBox(height: 4),
+      Text.rich(
+        t.login.signup(
+          linkToSignup: (text) => TextSpan(
+            text: text,
+            style: TextStyle(
+              color: colorScheme.brightness == Brightness.dark
+                  ? saberColor
+                  : saberColorDarkened,
+            ),
+            recognizer: TapGestureRecognizer()
+              ..onTap = () {
+                launchUrl(NcLoginPage.signupUrl);
+              },
+          ),
+        ),
+      ),
+      const SizedBox(height: 32),
+      Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          SvgPicture.asset(
+            'assets/images/nextcloud-logo.svg',
+            width: 32,
+            height: 32,
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Text(
+              t.login.ncLoginStep.otherNcServer,
+              style: textTheme.headlineSmall,
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 16),
+      TextField(
+        autocorrect: false,
+        autofillHints: const [AutofillHints.url],
+        controller: _serverUrlController,
+        decoration: InputDecoration(
+          labelText: t.login.ncLoginStep.serverUrl,
+          hintText: 'https://nc.example.com',
+        ),
+      ),
+      const SizedBox(height: 4),
+      ValueListenableBuilder(
+        valueListenable: _serverUrlValid,
+        builder: (context, valid, child) {
+          return ElevatedButton(
+            onPressed: valid
+                ? () {
+                    _serverUrlController.text = _prependHttpsIfMissing(
+                      _serverUrlController.text,
+                    );
+                    startLoginFlow(Uri.parse(_serverUrlController.text));
+                  }
+                : null,
+            style: buttonColorStyle(ncColor),
+            child: child,
+          );
+        },
+        child: Text(t.login.ncLoginStep.loginWithNextcloud),
+      ),
+    ];
+  }
+
+  List<Widget> _buildWebDavLogin(
+    BuildContext context,
+    TextTheme textTheme,
+    ColorScheme colorScheme,
+  ) {
+    return [
+      Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          const Icon(Icons.storage_rounded, size: 32),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Text(
+              'Connect your own WebDAV server',
+              style: textTheme.headlineSmall,
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 16),
+      TextField(
+        autocorrect: false,
+        autofillHints: const [AutofillHints.url],
+        controller: _webDavUrlController,
+        decoration: const InputDecoration(
+          labelText: 'WebDAV URL',
+          hintText: 'https://dav.example.com/remote.php/dav/files/user/',
+        ),
+      ),
+      const SizedBox(height: 12),
+      TextField(
+        autocorrect: false,
+        autofillHints: const [AutofillHints.username],
+        controller: _webDavUsernameController,
+        decoration: const InputDecoration(labelText: 'Username'),
+      ),
+      const SizedBox(height: 12),
+      TextField(
+        autocorrect: false,
+        autofillHints: const [AutofillHints.password],
+        controller: _webDavPasswordController,
+        obscureText: true,
+        decoration: const InputDecoration(labelText: 'Password'),
+      ),
+      const SizedBox(height: 4),
+      ValueListenableBuilder(
+        valueListenable: _webDavError,
+        builder: (context, error, _) {
+          if (error.isEmpty) return const SizedBox.shrink();
+          return Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(error, style: TextStyle(color: colorScheme.error)),
+          );
+        },
+      ),
+      const SizedBox(height: 4),
+      ValueListenableBuilder(
+        valueListenable: _webDavValid,
+        builder: (context, valid, child) {
+          return ValueListenableBuilder(
+            valueListenable: _webDavBusy,
+            builder: (context, busy, _) {
+              return ElevatedButton(
+                onPressed: valid && !busy ? _loginWithWebDav : null,
+                style: buttonColorStyle(webDavColor),
+                child: busy
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: AdaptiveCircularProgressIndicator(),
+                      )
+                    : child,
+              );
+            },
+          );
+        },
+        child: const Text('Continue with WebDAV'),
+      ),
+    ];
+  }
+
+  Future<void> _loginWithWebDav() async {
+    _webDavError.value = '';
+    _webDavBusy.value = true;
+
+    try {
+      final url = _prependHttpsIfMissing(_webDavUrlController.text.trim());
+      final username = _webDavUsernameController.text.trim();
+      final password = _webDavPasswordController.text;
+
+      final client = WebDavSaberSyncClient(
+        baseUri: Uri.parse(url),
+        username: username,
+        password: password,
+      );
+      await client.validateCredentials();
+
+      stows.syncBackend.value = SyncBackend.webdav;
+      stows.url.value = url;
+      stows.username.value = username;
+      stows.ncPassword.value = password;
+      stows.encPassword.value = '';
+      stows.key.value = '';
+      stows.iv.value = '';
+      stows.pfp.value = null;
+      stows.lastStorageQuota.value = null;
+
+      widget.recheckCurrentStep();
+    } catch (e) {
+      _webDavError.value = 'Failed to connect to WebDAV.\n\n$e';
+    } finally {
+      _webDavBusy.value = false;
+    }
   }
 
   static ButtonStyle buttonColorStyle(Color primary, [Color? onPrimary]) {
@@ -239,8 +418,7 @@ class _NcLoginStepState extends State<NcLoginStep> {
 }
 
 class _LoginFlowDialog extends StatefulWidget {
-  // ignore: unused_element_parameter
-  const _LoginFlowDialog({super.key, required this.loginFlow});
+  const _LoginFlowDialog({required this.loginFlow});
 
   final SaberLoginFlow loginFlow;
 
@@ -263,7 +441,7 @@ class _LoginFlowDialogState extends State<_LoginFlowDialog> {
     return AlertDialog.adaptive(
       title: Text(t.login.ncLoginStep.loginFlow.pleaseAuthorize),
       content: Column(
-        mainAxisSize: .min,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Text(t.login.ncLoginStep.loginFlow.followPrompts),
           TextButton(
@@ -293,8 +471,7 @@ class _LoginFlowDialogState extends State<_LoginFlowDialog> {
 ///
 /// When pressed, the text will be replaced with a spinner for 10 seconds.
 class _FakeDoneButton extends StatefulWidget {
-  // ignore: unused_element_parameter
-  const _FakeDoneButton({super.key, required this.child});
+  const _FakeDoneButton({required this.child});
 
   final Widget child;
 

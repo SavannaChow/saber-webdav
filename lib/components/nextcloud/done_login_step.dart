@@ -1,3 +1,4 @@
+// 🤖 Generated wholely or partially with GPT-5 Codex; OpenAI
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -9,6 +10,7 @@ import 'package:saber/data/extensions/string_extensions.dart';
 import 'package:saber/data/nextcloud/nextcloud_client_extension.dart';
 import 'package:saber/data/nextcloud/readable_bytes.dart';
 import 'package:saber/data/prefs.dart';
+import 'package:saber/data/sync/saber_sync_client.dart';
 import 'package:saber/i18n/strings.g.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -44,8 +46,10 @@ class _DoneLoginStepState extends State<DoneLoginStep> {
     final screenWidth = MediaQuery.sizeOf(context).width;
     final screenHeight = MediaQuery.sizeOf(context).height;
     final quota = stows.lastStorageQuota.value;
+    final isNextcloud = stows.syncBackend.value == SyncBackend.nextcloud;
     final serverName =
-        stows.url.value.ifNotEmpty ?? t.login.ncLoginStep.saberNcServer;
+        stows.url.value.ifNotEmpty ??
+        (isNextcloud ? t.login.ncLoginStep.saberNcServer : 'WebDAV');
     late final serverUri = stows.url.value.isEmpty
         ? NextcloudClientExtension.defaultNextcloudUri
         : Uri.parse(stows.url.value);
@@ -84,20 +88,22 @@ class _DoneLoginStepState extends State<DoneLoginStep> {
           ],
         ),
         const SizedBox(height: 2),
-        Text(
-          t.profile.quotaUsage(
-            used: readableBytes(quota?.used),
-            total: readableBytes(quota?.total),
-            percent: quota?.percentRounded ?? 0,
+        if (isNextcloud) ...[
+          Text(
+            t.profile.quotaUsage(
+              used: readableBytes(quota?.used),
+              total: readableBytes(quota?.total),
+              percent: quota?.percentRounded ?? 0,
+            ),
           ),
-        ),
-        const SizedBox(height: 2),
-        LinearProgressIndicator(
-          value: quota?.progressIndicatorValue,
-          minHeight: 32,
-          borderRadius: _elevatedButtonBorderRadiusOf(context),
-        ),
-        const SizedBox(height: 4),
+          const SizedBox(height: 2),
+          LinearProgressIndicator(
+            value: quota?.progressIndicatorValue,
+            minHeight: 32,
+            borderRadius: _elevatedButtonBorderRadiusOf(context),
+          ),
+          const SizedBox(height: 4),
+        ],
         ElevatedButton(onPressed: _logout, child: Text(t.profile.logout)),
         const SizedBox(height: 32),
         Text(t.profile.connectedTo, style: const TextStyle(height: 0.8)),
@@ -116,17 +122,19 @@ class _DoneLoginStepState extends State<DoneLoginStep> {
               ),
             ),
             const SizedBox(width: 8),
-            Flexible(
-              fit: FlexFit.tight,
-              child: ElevatedButton(
-                onPressed: () {
-                  final url = '$serverUri/index.php/settings/user/drop_account';
-                  log.info('Opening URL: $url');
-                  launchUrl(Uri.parse(url));
-                },
-                child: Text(t.profile.quickLinks.deleteAccount),
+            if (isNextcloud)
+              Flexible(
+                fit: FlexFit.tight,
+                child: ElevatedButton(
+                  onPressed: () {
+                    final url =
+                        '$serverUri/index.php/settings/user/drop_account';
+                    log.info('Opening URL: $url');
+                    launchUrl(Uri.parse(url));
+                  },
+                  child: Text(t.profile.quickLinks.deleteAccount),
+                ),
               ),
-            ),
           ],
         ),
         const SizedBox(height: 32),

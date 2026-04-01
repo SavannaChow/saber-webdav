@@ -1,3 +1,4 @@
+// 🤖 Generated wholely or partially with GPT-5 Codex; OpenAI
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
@@ -7,8 +8,8 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:logging/logging.dart';
 import 'package:saber/components/misc/faq.dart';
 import 'package:saber/data/nextcloud/errors.dart';
-import 'package:saber/data/nextcloud/nextcloud_client_extension.dart';
 import 'package:saber/data/prefs.dart';
+import 'package:saber/data/sync/saber_sync_client.dart';
 import 'package:saber/i18n/strings.g.dart';
 import 'package:sbn/font_fallbacks.dart';
 import 'package:yaru/yaru.dart';
@@ -153,7 +154,7 @@ class _EncLoginStepState extends State<EncLoginStep> {
 
     try {
       stows.encPassword.value = encPassword;
-      final client = NextcloudClientExtension.withSavedDetails()!;
+      final client = SaberSyncClient.withSavedDetails()!;
       _isChecking.value = true;
       await client.loadEncryptionKey();
       widget.recheckCurrentStep();

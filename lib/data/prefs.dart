@@ -1,3 +1,4 @@
+// 🤖 Generated wholely or partially with GPT-5 Codex; OpenAI
 import 'dart:async';
 import 'dart:io';
 
@@ -11,6 +12,7 @@ import 'package:saber/data/codecs/base64_codec.dart';
 import 'package:saber/data/codecs/quota_codec.dart';
 import 'package:saber/data/flavor_config.dart';
 import 'package:saber/data/sentry/sentry_consent.dart';
+import 'package:saber/data/sync/saber_sync_client.dart';
 import 'package:saber/data/tools/highlighter.dart';
 import 'package:saber/data/tools/pen.dart';
 import 'package:sbn/canvas_background_pattern.dart';
@@ -53,6 +55,12 @@ class Stows {
   final allowInsecureConnections = SecureStow.bool(
     'allowInsecureConnections',
     false,
+    volatile: !_isOnMainIsolate,
+  );
+  final syncBackend = PlainStow(
+    'syncBackend',
+    SyncBackend.nextcloud,
+    codec: const EnumCodec(SyncBackend.values),
     volatile: !_isOnMainIsolate,
   );
   final url = SecureStow('url', '', volatile: !_isOnMainIsolate);
