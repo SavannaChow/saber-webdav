@@ -1,3 +1,4 @@
+// 🤖 Generated wholely or partially with GPT-5 Codex; OpenAI
 import 'dart:async';
 import 'dart:io';
 
@@ -18,11 +19,13 @@ import 'package:saber/components/canvas/pencil_shader.dart';
 import 'package:saber/components/theming/dynamic_material_app.dart';
 import 'package:saber/data/file_manager/file_manager.dart';
 import 'package:saber/data/flavor_config.dart';
+import 'package:saber/data/google_drive/google_drive_auth.dart';
 import 'package:saber/data/nextcloud/nc_http_overrides.dart';
 import 'package:saber/data/nextcloud/saber_syncer.dart';
 import 'package:saber/data/prefs.dart';
 import 'package:saber/data/routes.dart';
 import 'package:saber/data/sentry/sentry_init.dart';
+import 'package:saber/data/sync/saber_sync_client.dart';
 import 'package:saber/data/tools/stroke_properties.dart';
 import 'package:saber/i18n/strings.g.dart';
 import 'package:saber/pages/editor/editor.dart';
@@ -89,6 +92,7 @@ Future<void> appRunner(List<String> args) async {
       windowManager.ensureInitialized(),
     workerManager.init(),
     stows.locale.waitUntilRead(),
+    stows.syncBackend.waitUntilRead(),
     stows.url.waitUntilRead(),
     stows.allowInsecureConnections.waitUntilRead(),
     PencilShader.init(),
@@ -97,6 +101,16 @@ Future<void> appRunner(List<String> args) async {
     }),
     OnyxSdkPenArea.init(),
   ]);
+
+  if (stows.syncBackend.value == SyncBackend.googleDrive) {
+    final account = await GoogleDriveAuth.tryRestoreSession();
+    if (account == null) {
+      stows.username.value = '';
+      stows.googleDriveFolderId.value = '';
+    } else {
+      stows.username.value = account.email;
+    }
+  }
 
   setLocale();
   stows.locale.addListener(setLocale);
@@ -122,6 +136,7 @@ Future<void> appRunner(List<String> args) async {
 }
 
 void startSyncAfterLoaded() async {
+  await stows.syncBackend.waitUntilRead();
   await stows.username.waitUntilRead();
   await stows.encPassword.waitUntilRead();
 
@@ -198,9 +213,14 @@ void doBackgroundSync() {
     await Future.wait([
       FileManager.init(),
       workerManager.init(),
+      stows.syncBackend.waitUntilRead(),
       stows.url.waitUntilRead(),
       stows.allowInsecureConnections.waitUntilRead(),
     ]);
+
+    if (stows.syncBackend.value == SyncBackend.googleDrive) {
+      return false;
+    }
 
     /// Only sync a few files to avoid using too much data/battery
     const maxFilesSynced = 10;

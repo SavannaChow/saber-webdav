@@ -7,6 +7,7 @@ import 'package:logging/logging.dart';
 import 'package:saber/components/misc/faq.dart';
 import 'package:saber/data/extensions/quota_extension.dart';
 import 'package:saber/data/extensions/string_extensions.dart';
+import 'package:saber/data/google_drive/google_drive_auth.dart';
 import 'package:saber/data/nextcloud/nextcloud_client_extension.dart';
 import 'package:saber/data/nextcloud/readable_bytes.dart';
 import 'package:saber/data/prefs.dart';
@@ -28,13 +29,17 @@ class _DoneLoginStepState extends State<DoneLoginStep> {
 
   late final log = Logger('DoneLoginStep');
 
-  void _logout() {
+  Future<void> _logout() async {
+    if (stows.syncBackend.value == SyncBackend.googleDrive) {
+      await GoogleDriveAuth.signOut();
+    }
     stows.url.value = '';
     stows.username.value = '';
     stows.ncPassword.value = '';
     stows.encPassword.value = '';
     stows.pfp.value = null;
     stows.lastStorageQuota.value = null;
+    stows.googleDriveFolderId.value = '';
     stows.key.value = '';
     stows.iv.value = '';
     widget.recheckCurrentStep();
@@ -47,11 +52,18 @@ class _DoneLoginStepState extends State<DoneLoginStep> {
     final screenHeight = MediaQuery.sizeOf(context).height;
     final quota = stows.lastStorageQuota.value;
     final isNextcloud = stows.syncBackend.value == SyncBackend.nextcloud;
+    final isGoogleDrive = stows.syncBackend.value == SyncBackend.googleDrive;
     final serverName =
         stows.url.value.ifNotEmpty ??
-        (isNextcloud ? t.login.ncLoginStep.saberNcServer : 'WebDAV');
+        (isNextcloud
+            ? t.login.ncLoginStep.saberNcServer
+            : isGoogleDrive
+            ? 'Google Drive'
+            : 'WebDAV');
     late final serverUri = stows.url.value.isEmpty
-        ? NextcloudClientExtension.defaultNextcloudUri
+        ? isGoogleDrive
+              ? Uri.parse('https://drive.google.com/drive/my-drive')
+              : NextcloudClientExtension.defaultNextcloudUri
         : Uri.parse(stows.url.value);
     return ListView(
       padding: .symmetric(

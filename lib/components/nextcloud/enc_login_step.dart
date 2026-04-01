@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:logging/logging.dart';
 import 'package:saber/components/misc/faq.dart';
+import 'package:saber/data/google_drive/google_drive_auth.dart';
 import 'package:saber/data/nextcloud/errors.dart';
 import 'package:saber/data/prefs.dart';
 import 'package:saber/data/sync/saber_sync_client.dart';
@@ -73,6 +74,9 @@ class _EncLoginStepState extends State<EncLoginStep> {
               style: TextStyle(color: colorScheme.link),
               recognizer: TapGestureRecognizer()
                 ..onTap = () {
+                  if (stows.syncBackend.value == SyncBackend.googleDrive) {
+                    GoogleDriveAuth.signOut();
+                  }
                   stows.url.value = '';
                   stows.username.value = '';
                   stows.ncPassword.value = '';

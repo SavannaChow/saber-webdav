@@ -68,7 +68,11 @@ class _NextcloudProfileState extends State<NextcloudProfile> {
       .waitingForPrefs => '',
       .nc => t.login.status.tapToLogin,
       .enc => t.login.status.almostDone,
-      .done => isNextcloud ? t.login.status.loggedIn : 'WebDAV connected',
+      .done => isNextcloud
+          ? t.login.status.loggedIn
+          : stows.syncBackend.value == SyncBackend.googleDrive
+          ? 'Google Drive connected'
+          : 'WebDAV connected',
     };
     const pfpSize = 48.0;
 

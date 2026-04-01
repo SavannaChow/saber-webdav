@@ -1,3 +1,4 @@
+/// 🤖 Generated wholely or partially with GPT-5 Codex; OpenAI
 class FlavorConfig {
   FlavorConfig._();
 
@@ -11,14 +12,24 @@ class FlavorConfig {
   static bool get shouldCheckForUpdatesByDefault =>
       _shouldCheckForUpdatesByDefault;
 
+  static late String _googleDriveClientId;
+  static String get googleDriveClientId => _googleDriveClientId;
+
+  static late String _googleDriveServerClientId;
+  static String get googleDriveServerClientId => _googleDriveServerClientId;
+
   static void setup({
     String flavor = '',
     String appStore = '',
     bool shouldCheckForUpdatesByDefault = true,
+    String googleDriveClientId = '',
+    String googleDriveServerClientId = '',
   }) {
     _flavor = flavor;
     _appStore = appStore;
     _shouldCheckForUpdatesByDefault = shouldCheckForUpdatesByDefault;
+    _googleDriveClientId = googleDriveClientId;
+    _googleDriveServerClientId = googleDriveServerClientId;
   }
 
   static void setupFromEnvironment() => setup(
@@ -27,6 +38,10 @@ class FlavorConfig {
     shouldCheckForUpdatesByDefault: const bool.fromEnvironment(
       'UPDATE_CHECK',
       defaultValue: true,
+    ),
+    googleDriveClientId: const String.fromEnvironment('GOOGLE_DRIVE_CLIENT_ID'),
+    googleDriveServerClientId: const String.fromEnvironment(
+      'GOOGLE_DRIVE_SERVER_CLIENT_ID',
     ),
   );
 }

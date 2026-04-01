@@ -10,6 +10,7 @@ import 'package:nextcloud/nextcloud.dart';
 import 'package:regexed_validator/regexed_validator.dart';
 import 'package:saber/components/settings/app_info.dart';
 import 'package:saber/components/theming/adaptive_circular_progress_indicator.dart';
+import 'package:saber/data/google_drive/google_drive_auth.dart';
 import 'package:saber/data/nextcloud/login_flow.dart';
 import 'package:saber/data/nextcloud/nextcloud_client_extension.dart';
 import 'package:saber/data/prefs.dart';
@@ -36,6 +37,7 @@ class _NcLoginStepState extends State<NcLoginStep> {
   static const saberColorDarkened = Color(0xFFc29800);
   static const ncColor = Color(0xFF0082c9);
   static const webDavColor = Color(0xFF33691E);
+  static const googleDriveColor = Color(0xFF1A73E8);
 
   SaberLoginFlow? loginFlow;
 
@@ -48,6 +50,8 @@ class _NcLoginStepState extends State<NcLoginStep> {
   late final _webDavUrlController = TextEditingController();
   late final _webDavUsernameController = TextEditingController();
   late final _webDavPasswordController = TextEditingController();
+  final _googleDriveBusy = ValueNotifier(false);
+  final _googleDriveError = ValueNotifier('');
 
   late SyncBackend _selectedBackend = stows.syncBackend.value;
 
@@ -84,6 +88,8 @@ class _NcLoginStepState extends State<NcLoginStep> {
     _webDavValid.dispose();
     _webDavBusy.dispose();
     _webDavError.dispose();
+    _googleDriveBusy.dispose();
+    _googleDriveError.dispose();
     super.dispose();
   }
 
@@ -174,24 +180,42 @@ class _NcLoginStepState extends State<NcLoginStep> {
         SegmentedButton<SyncBackend>(
           segments: const [
             ButtonSegment(
+              value: SyncBackend.googleDrive,
+              label: Text('Google Drive'),
+            ),
+            ButtonSegment(value: SyncBackend.webdav, label: Text('WebDAV')),
+            ButtonSegment(
               value: SyncBackend.nextcloud,
               label: Text('Nextcloud'),
             ),
-            ButtonSegment(value: SyncBackend.webdav, label: Text('WebDAV')),
           ],
           selected: {_selectedBackend},
           onSelectionChanged: (selection) {
             setState(() {
               _selectedBackend = selection.first;
               _webDavError.value = '';
+              _googleDriveError.value = '';
             });
           },
         ),
         const SizedBox(height: 24),
-        if (_selectedBackend == SyncBackend.nextcloud)
-          ..._buildNextcloudLogin(context, textTheme, colorScheme)
-        else
-          ..._buildWebDavLogin(context, textTheme, colorScheme),
+        ...switch (_selectedBackend) {
+          SyncBackend.googleDrive => _buildGoogleDriveLogin(
+            context,
+            textTheme,
+            colorScheme,
+          ),
+          SyncBackend.webdav => _buildWebDavLogin(
+            context,
+            textTheme,
+            colorScheme,
+          ),
+          SyncBackend.nextcloud => _buildNextcloudLogin(
+            context,
+            textTheme,
+            colorScheme,
+          ),
+        },
       ],
     );
   }
@@ -401,6 +425,101 @@ class _NcLoginStepState extends State<NcLoginStep> {
       _webDavError.value = 'Failed to connect to WebDAV.\n\n$e';
     } finally {
       _webDavBusy.value = false;
+    }
+  }
+
+  List<Widget> _buildGoogleDriveLogin(
+    BuildContext context,
+    TextTheme textTheme,
+    ColorScheme colorScheme,
+  ) {
+    final isConfigured = GoogleDriveAuth.isConfigured;
+    final unsupportedMessage = !GoogleDriveAuth.isSupported
+        ? 'Google Drive sync is currently supported on Android and macOS.'
+        : !isConfigured
+        ? 'Google Drive is not configured for this build.\n\n'
+              'Build with --dart-define=GOOGLE_DRIVE_CLIENT_ID=...'
+        : '';
+
+    return [
+      Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          const Icon(Icons.cloud_circle_rounded, size: 32),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Text('Connect Google Drive', style: textTheme.headlineSmall),
+          ),
+        ],
+      ),
+      const SizedBox(height: 16),
+      const Text(
+        'Saber will create a visible "Saber" folder in your Google Drive and '
+        'store encrypted sync files there.',
+      ),
+      if (unsupportedMessage.isNotEmpty) ...[
+        const SizedBox(height: 12),
+        Text(
+          unsupportedMessage,
+          style: TextStyle(color: colorScheme.error),
+        ),
+      ],
+      ValueListenableBuilder(
+        valueListenable: _googleDriveError,
+        builder: (context, error, _) {
+          if (error.isEmpty) return const SizedBox.shrink();
+          return Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: Text(error, style: TextStyle(color: colorScheme.error)),
+          );
+        },
+      ),
+      const SizedBox(height: 12),
+      ValueListenableBuilder(
+        valueListenable: _googleDriveBusy,
+        builder: (context, busy, child) {
+          return ElevatedButton(
+            onPressed: (!isConfigured || busy || !GoogleDriveAuth.isSupported)
+                ? null
+                : _loginWithGoogleDrive,
+            style: buttonColorStyle(googleDriveColor),
+            child: busy
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: AdaptiveCircularProgressIndicator(),
+                  )
+                : child,
+          );
+        },
+        child: const Text('Continue with Google Drive'),
+      ),
+    ];
+  }
+
+  Future<void> _loginWithGoogleDrive() async {
+    _googleDriveError.value = '';
+    _googleDriveBusy.value = true;
+
+    try {
+      final account = await GoogleDriveAuth.signInInteractive();
+      final avatar = await GoogleDriveAuth.getAvatar();
+
+      stows.syncBackend.value = SyncBackend.googleDrive;
+      stows.url.value = 'https://drive.google.com/drive/my-drive';
+      stows.username.value = account.email;
+      stows.ncPassword.value = '';
+      stows.encPassword.value = '';
+      stows.key.value = '';
+      stows.iv.value = '';
+      stows.pfp.value = avatar;
+      stows.lastStorageQuota.value = null;
+
+      widget.recheckCurrentStep();
+    } catch (e) {
+      _googleDriveError.value = 'Failed to connect to Google Drive.\n\n$e';
+    } finally {
+      _googleDriveBusy.value = false;
     }
   }
 

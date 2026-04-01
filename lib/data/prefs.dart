@@ -76,12 +76,22 @@ class Stows {
     volatile: !_isOnMainIsolate,
   );
 
-  /// Whether the user is logged in and has provided both passwords.
+  final googleDriveFolderId = SecureStow(
+    'googleDriveFolderId',
+    '',
+    volatile: !_isOnMainIsolate,
+  );
+
+  /// Whether the user is authenticated with the configured sync backend.
   /// Please ensure that the relevant Prefs are loaded before using this.
-  bool get loggedIn =>
-      username.value.isNotEmpty &&
-      ncPassword.value.isNotEmpty &&
-      encPassword.value.isNotEmpty;
+  bool get hasRemoteLogin => switch (syncBackend.value) {
+    SyncBackend.googleDrive => username.value.isNotEmpty,
+    _ => username.value.isNotEmpty && ncPassword.value.isNotEmpty,
+  };
+
+  /// Whether the user is logged in and has provided the encryption password.
+  /// Please ensure that the relevant Prefs are loaded before using this.
+  bool get loggedIn => hasRemoteLogin && encPassword.value.isNotEmpty;
 
   final key = SecureStow('key', '', volatile: !_isOnMainIsolate);
   final iv = SecureStow('iv', '', volatile: !_isOnMainIsolate);

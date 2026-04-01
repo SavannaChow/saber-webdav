@@ -1,3 +1,4 @@
+// 🤖 Generated wholely or partially with GPT-5 Codex; OpenAI
 import 'package:flutter/material.dart';
 import 'package:logging/logging.dart';
 import 'package:saber/components/nextcloud/done_login_step.dart';
@@ -30,6 +31,7 @@ class NcLoginPage extends StatefulWidget {
 
   static LoginStep getCurrentStep() {
     if (!stows.url.loaded ||
+        !stows.syncBackend.loaded ||
         !stows.username.loaded ||
         !stows.ncPassword.loaded ||
         !stows.encPassword.loaded ||
@@ -38,7 +40,7 @@ class NcLoginPage extends StatefulWidget {
       return .waitingForPrefs;
     }
 
-    if (stows.username.value.isEmpty || stows.ncPassword.value.isEmpty) {
+    if (!stows.hasRemoteLogin) {
       return .nc;
     }
     if (stows.encPassword.value.isEmpty ||
@@ -70,6 +72,7 @@ class _NcLoginPageState extends State<NcLoginPage> {
     step = .waitingForPrefs;
 
     if (!stows.url.loaded ||
+        !stows.syncBackend.loaded ||
         !stows.username.loaded ||
         !stows.ncPassword.loaded ||
         !stows.encPassword.loaded ||
@@ -77,6 +80,7 @@ class _NcLoginPageState extends State<NcLoginPage> {
         !stows.iv.loaded)
       await Future.wait([
         stows.url.waitUntilRead(),
+        stows.syncBackend.waitUntilRead(),
         stows.username.waitUntilRead(),
         stows.ncPassword.waitUntilRead(),
         stows.encPassword.waitUntilRead(),

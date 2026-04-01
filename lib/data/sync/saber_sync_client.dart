@@ -13,24 +13,27 @@ import 'package:nextcloud/nextcloud.dart';
 import 'package:nextcloud/provisioning_api.dart';
 import 'package:nextcloud/webdav.dart';
 import 'package:saber/data/file_manager/file_manager.dart';
+import 'package:saber/data/google_drive/google_drive_auth.dart';
 import 'package:saber/data/nextcloud/errors.dart';
 import 'package:saber/data/nextcloud/nextcloud_client_extension.dart';
 import 'package:saber/data/prefs.dart';
 import 'package:saber/data/version.dart';
 import 'package:xml/xml.dart';
 
-enum SyncBackend { nextcloud, webdav }
+enum SyncBackend { nextcloud, webdav, googleDrive }
 
 class SaberRemoteFile {
   const SaberRemoteFile({
     required this.path,
     required this.isDirectory,
+    this.id,
     this.size,
     this.lastModified,
   });
 
   final String path;
   final bool isDirectory;
+  final String? id;
   final int? size;
   final DateTime? lastModified;
 
@@ -54,11 +57,8 @@ abstract class SaberSyncClient {
   static final log = Logger('SaberSyncClient');
 
   static SaberSyncClient? withSavedDetails() {
-    if (stows.username.value.isEmpty || stows.ncPassword.value.isEmpty) {
-      return null;
-    }
-
     return switch (stows.syncBackend.value) {
+      SyncBackend.googleDrive => GoogleDriveSaberSyncClient.withSavedDetails(),
       SyncBackend.nextcloud => NextcloudSaberSyncClient.withSavedDetails(),
       SyncBackend.webdav => WebDavSaberSyncClient.withSavedDetails(),
     };
@@ -260,6 +260,324 @@ class NextcloudSaberSyncClient extends SaberSyncClient {
       size: file.size,
       lastModified: file.lastModified,
     );
+  }
+}
+
+class GoogleDriveSaberSyncClient extends SaberSyncClient {
+  GoogleDriveSaberSyncClient({
+    http.Client? httpClient,
+    Future<Map<String, String>> Function()? authHeadersProvider,
+    Future<String> Function()? usernameProvider,
+    Future<Uint8List?> Function()? avatarProvider,
+  }) : httpClient = httpClient ?? http.Client(),
+       authHeadersProvider = authHeadersProvider ?? GoogleDriveAuth.authHeaders,
+       usernameProvider = usernameProvider ?? GoogleDriveAuth.getUsername,
+       avatarProvider = avatarProvider ?? GoogleDriveAuth.getAvatar;
+
+  static const _apiHost = 'www.googleapis.com';
+  static const _driveApiPath = '/drive/v3/files';
+  static const _uploadApiPath = '/upload/drive/v3/files';
+  static const _folderMimeType = 'application/vnd.google-apps.folder';
+  static const _folderName = FileManager.appRootDirectoryPrefix;
+  static const _lastModifiedProperty = 'saberLastModifiedMs';
+
+  final http.Client httpClient;
+  final Future<Map<String, String>> Function() authHeadersProvider;
+  final Future<String> Function() usernameProvider;
+  final Future<Uint8List?> Function() avatarProvider;
+
+  static GoogleDriveSaberSyncClient? withSavedDetails() {
+    if (!stows.hasRemoteLogin) return null;
+    return GoogleDriveSaberSyncClient();
+  }
+
+  @override
+  Encrypter get encrypter => SaberSyncClient.buildEncrypter();
+
+  @override
+  Future<void> validateCredentials() async {
+    await GoogleDriveAuth.requireAccount();
+    await _resolveFolderId(createIfMissing: true);
+  }
+
+  @override
+  Future<Set<SaberRemoteFile>> findRemoteFiles() async {
+    final folderId = await _resolveFolderId(createIfMissing: true);
+    final files = await _listFiles(
+      "'$folderId' in parents and trashed = false",
+    );
+    return files.map(_toRemoteFile).toSet();
+  }
+
+  @override
+  Future<SaberRemoteFile?> getRemoteFile(String remotePath) async {
+    final folderId = await _resolveFolderId(createIfMissing: false);
+    if (folderId == null) return null;
+
+    final name = _basename(remotePath);
+    final files = await _listFiles(
+      "name = '${_escapeQueryValue(name)}' and "
+      "'$folderId' in parents and trashed = false",
+      pageSize: 1,
+    );
+    if (files.isEmpty) return null;
+    return _toRemoteFile(files.first);
+  }
+
+  @override
+  Future<Uint8List> download(String remotePath) async {
+    final remoteFile = await getRemoteFile(remotePath);
+    if (remoteFile?.id == null) {
+      throw HttpException('Google Drive file not found for $remotePath');
+    }
+
+    final response = await _send(
+      method: 'GET',
+      uri: Uri.https(
+        _apiHost,
+        '$_driveApiPath/${remoteFile!.id}',
+        const {'alt': 'media'},
+      ),
+      expectedStatusCodes: const {200},
+    );
+    return response.bodyBytes;
+  }
+
+  @override
+  Future<void> upload(
+    Uint8List bytes,
+    String remotePath, {
+    DateTime? lastModified,
+  }) async {
+    final folderId = await _resolveFolderId(createIfMissing: true);
+    final existing = await getRemoteFile(remotePath);
+    final metadata = <String, Object?>{
+      'name': _basename(remotePath),
+      'parents': [folderId],
+      'appProperties': {
+        _lastModifiedProperty:
+            (lastModified ?? DateTime.now()).millisecondsSinceEpoch.toString(),
+      },
+    };
+
+    final boundary = 'saber-${DateTime.now().microsecondsSinceEpoch}';
+    final body = _buildMultipartRelatedBody(
+      boundary: boundary,
+      metadata: metadata,
+      bytes: bytes,
+    );
+
+    final basePath = existing?.id == null
+        ? _uploadApiPath
+        : '$_uploadApiPath/${existing!.id}';
+    final response = await _send(
+      method: existing?.id == null ? 'POST' : 'PATCH',
+      uri: Uri.https(
+        _apiHost,
+        basePath,
+        const {'uploadType': 'multipart', 'fields': 'id'},
+      ),
+      bodyBytes: body,
+      headers: {
+        HttpHeaders.contentTypeHeader:
+            'multipart/related; boundary=$boundary',
+      },
+      expectedStatusCodes: const {200},
+    );
+
+    final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+    if (folderId != null &&
+        decoded is Map<String, dynamic> &&
+        decoded['id'] is String) {
+      _rememberFolderId(folderId);
+    }
+  }
+
+  @override
+  Future<Map<String, String>> getConfig() async {
+    final response = await _downloadOptional(SaberSyncClient.configFileUri.path);
+    if (response == null) return {};
+
+    final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+    return (decoded as Map<String, dynamic>).cast<String, String>();
+  }
+
+  @override
+  Future<void> setConfig(Map<String, String> config) async {
+    await upload(
+      Uint8List.fromList(utf8.encode(jsonEncode(config))),
+      SaberSyncClient.configFileUri.path,
+    );
+  }
+
+  @override
+  Future<String> getUsername() => usernameProvider();
+
+  @override
+  Future<Uint8List?> getAvatar() => avatarProvider();
+
+  Future<http.Response?> _downloadOptional(String remotePath) async {
+    final remoteFile = await getRemoteFile(remotePath);
+    if (remoteFile?.id == null) return null;
+
+    return _send(
+      method: 'GET',
+      uri: Uri.https(
+        _apiHost,
+        '$_driveApiPath/${remoteFile!.id}',
+        const {'alt': 'media'},
+      ),
+      expectedStatusCodes: const {200},
+    );
+  }
+
+  Future<String?> _resolveFolderId({required bool createIfMissing}) async {
+    final cached = stows.googleDriveFolderId.value;
+    if (cached.isNotEmpty) {
+      final file = await _getFileById(cached);
+      if (file != null && file['mimeType'] == _folderMimeType) return cached;
+    }
+
+    final files = await _listFiles(
+      "name = '${_escapeQueryValue(_folderName)}' and "
+      "mimeType = '$_folderMimeType' and "
+      "'root' in parents and trashed = false",
+      pageSize: 1,
+    );
+    if (files.isNotEmpty) {
+      final folderId = files.first['id'] as String;
+      _rememberFolderId(folderId);
+      return folderId;
+    }
+
+    if (!createIfMissing) return null;
+
+    final response = await _send(
+      method: 'POST',
+      uri: Uri.https(_apiHost, _driveApiPath, const {'fields': 'id'}),
+      jsonBody: {
+        'name': _folderName,
+        'mimeType': _folderMimeType,
+        'parents': ['root'],
+      },
+      expectedStatusCodes: const {200},
+    );
+    final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+    final folderId = (decoded as Map<String, dynamic>)['id'] as String;
+    _rememberFolderId(folderId);
+    return folderId;
+  }
+
+  Future<List<Map<String, dynamic>>> _listFiles(
+    String query, {
+    int pageSize = 1000,
+  }) async {
+    final response = await _send(
+      method: 'GET',
+      uri: Uri.https(_apiHost, _driveApiPath, {
+        'q': query,
+        'spaces': 'drive',
+        'pageSize': '$pageSize',
+        'fields':
+            'files(id,name,mimeType,size,modifiedTime,appProperties,trashed)',
+      }),
+      expectedStatusCodes: const {200},
+    );
+
+    final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+    final files = (decoded as Map<String, dynamic>)['files'] as List<dynamic>;
+    return files.cast<Map<String, dynamic>>();
+  }
+
+  Future<Map<String, dynamic>?> _getFileById(String fileId) async {
+    try {
+      final response = await _send(
+        method: 'GET',
+        uri: Uri.https(_apiHost, '$_driveApiPath/$fileId', const {
+          'fields': 'id,mimeType',
+        }),
+        expectedStatusCodes: const {200},
+      );
+      return jsonDecode(utf8.decode(response.bodyBytes))
+          as Map<String, dynamic>;
+    } on HttpException {
+      return null;
+    }
+  }
+
+  Future<http.Response> _send({
+    required String method,
+    required Uri uri,
+    Map<String, String>? headers,
+    Uint8List? bodyBytes,
+    Object? jsonBody,
+    Set<int> expectedStatusCodes = const {200},
+  }) async {
+    final request = http.Request(method, uri);
+    request.headers.addAll(await authHeadersProvider());
+    request.headers[HttpHeaders.userAgentHeader] = WebDavSaberSyncClient._userAgent;
+    if (headers != null) request.headers.addAll(headers);
+
+    if (jsonBody != null) {
+      request.headers[HttpHeaders.contentTypeHeader] = 'application/json';
+      request.body = jsonEncode(jsonBody);
+    } else if (bodyBytes != null) {
+      request.bodyBytes = bodyBytes;
+    }
+
+    final streamed = await httpClient.send(request);
+    final response = await http.Response.fromStream(streamed);
+    if (!expectedStatusCodes.contains(response.statusCode)) {
+      throw HttpException(
+        'Google Drive $method failed (${response.statusCode}) for $uri',
+      );
+    }
+    return response;
+  }
+
+  SaberRemoteFile _toRemoteFile(Map<String, dynamic> file) {
+    final name = file['name'] as String;
+    final appProperties = file['appProperties'] as Map<String, dynamic>?;
+    final storedModified = appProperties?[_lastModifiedProperty] as String?;
+    final modifiedTime = storedModified == null
+        ? DateTime.tryParse(file['modifiedTime'] as String? ?? '')
+        : DateTime.fromMillisecondsSinceEpoch(int.parse(storedModified));
+    return SaberRemoteFile(
+      id: file['id'] as String,
+      path: '${FileManager.appRootDirectoryPrefix}/$name',
+      isDirectory: file['mimeType'] == _folderMimeType,
+      size: int.tryParse(file['size'] as String? ?? ''),
+      lastModified: modifiedTime,
+    );
+  }
+
+  Uint8List _buildMultipartRelatedBody({
+    required String boundary,
+    required Map<String, Object?> metadata,
+    required Uint8List bytes,
+  }) {
+    final builder = BytesBuilder();
+    builder.add(_utf8(
+      '--$boundary\r\n'
+      'Content-Type: application/json; charset=UTF-8\r\n\r\n'
+      '${jsonEncode(metadata)}\r\n'
+      '--$boundary\r\n'
+      'Content-Type: application/octet-stream\r\n\r\n',
+    ));
+    builder.add(bytes);
+    builder.add(_utf8('\r\n--$boundary--\r\n'));
+    return builder.takeBytes();
+  }
+
+  static Uint8List _utf8(String value) => Uint8List.fromList(utf8.encode(value));
+
+  static String _basename(String remotePath) =>
+      remotePath.substring(remotePath.lastIndexOf('/') + 1);
+
+  static String _escapeQueryValue(String value) => value.replaceAll("'", r"\'");
+
+  void _rememberFolderId(String folderId) {
+    stows.googleDriveFolderId.value = folderId;
   }
 }
 
